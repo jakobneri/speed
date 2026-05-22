@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Speed Test — nerifeige.com</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="speed-container">
+
+    <header class="speed-header">
+      <small>nerifeige.com</small>
+      <h1>speed test</h1>
+    </header>
+
+    <!-- Stat strip -->
+    <div class="stat-strip" id="stat-strip">
+      <div class="stat-item">
+        <span class="stat-label">Download</span>
+        <span class="stat-value">
+          <span id="val-download">--</span>
+          <span class="stat-unit">Mbit/s</span>
+        </span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Upload</span>
+        <span class="stat-value">
+          <span id="val-upload">--</span>
+          <span class="stat-unit">Mbit/s</span>
+        </span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Ping</span>
+        <span class="stat-value">
+          <span id="val-ping">--</span>
+          <span class="stat-unit">ms</span>
+        </span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Jitter</span>
+        <span class="stat-value">
+          <span id="val-jitter">--</span>
+          <span class="stat-unit">ms</span>
+        </span>
+      </div>
+    </div>
+
+    <!-- Gauge area -->
+    <div class="gauge-section">
+      <div class="gauge-ring" id="gauge-ring">
+        <svg viewBox="0 0 200 200" class="gauge-svg">
+          <circle cx="100" cy="100" r="88" class="gauge-track"/>
+          <circle cx="100" cy="100" r="88" class="gauge-fill" id="gauge-fill"
+                  stroke-dasharray="553" stroke-dashoffset="553"/>
+        </svg>
+        <div class="gauge-center">
+          <div class="gauge-value" id="gauge-value">--</div>
+          <div class="gauge-label" id="gauge-label">Mbit/s</div>
+        </div>
+      </div>
+      <div class="gauge-phase" id="gauge-phase">Ready</div>
+    </div>
+
+    <!-- Start button -->
+    <button class="start-btn" id="start-btn" onclick="startTest()">
+      <span id="btn-text">Start</span>
+    </button>
+
+    <!-- Progress bar -->
+    <div class="test-progress" id="test-progress">
+      <div class="test-progress-fill" id="test-progress-fill"></div>
+    </div>
+
+    <!-- Traceroute map -->
+    <div class="map-section" id="map-section" style="display:none;">
+      <div class="section-header">
+        <span class="section-label">Route to Cloudflare (1.1.1.1)</span>
+        <span class="hop-count" id="hop-count">-- hops</span>
+      </div>
+      <div id="map" class="route-map"></div>
+      <div class="hop-list" id="hop-list"></div>
+    </div>
+
+    <footer class="speed-footer">
+      <span>nerifeige.com</span>
+    </footer>
+
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

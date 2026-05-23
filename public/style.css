@@ -47,9 +47,9 @@ body {
 
 /* ── Layout ──────────────────────────────────────────────────── */
 .speed-container {
-  max-width: 600px;
+  max-width: 1200px;
   margin: 0 auto;
-  padding: 40px 24px;
+  padding: 40px 32px;
   min-height: 100vh;
   display: flex;
   flex-direction: column;

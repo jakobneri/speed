@@ -101,6 +101,11 @@ async function measurePing(samples = 20) {
 
     $('live-ping-val').textContent = rtt.toFixed(1);
     pushChartPoint(charts.ping, rtt);
+    if (i > 0) {
+      const j = Math.abs(pings[i] - pings[i - 1]);
+      $('live-jitter-val').textContent = j.toFixed(1);
+      pushChartPoint(charts.jitter, j);
+    }
     setProgress((i + 1) / samples * 100, 'ping');
   }
   const avg = pings.reduce((a, b) => a + b) / pings.length;
@@ -221,9 +226,9 @@ async function runTraceroute() {
       } catch {}
     }
 
+    $('map-section').style.display = '';
     renderMap(hops, geoData);
     renderHopList(hops, geoData);
-    $('map-section').style.display = '';
 
     return hops;
   } catch (err) {
@@ -280,12 +285,13 @@ function renderMap(hops, geoData) {
       dashArray: '6 4'
     }).addTo(map);
 
-    // Fit to route bounds, but limit max zoom to keep context
     const bounds = L.latLngBounds(points).pad(0.2);
     map.fitBounds(bounds, { maxZoom: 7 });
   } else if (points.length === 1) {
     map.setView(points[0], 6);
   }
+
+  setTimeout(() => map.invalidateSize(), 100);
 }
 
 function renderHopList(hops, geoData) {
@@ -351,13 +357,7 @@ async function startTest() {
     $('val-ping').textContent = results.ping_ms.toFixed(1);
     $('live-ping-val').textContent = results.ping_ms.toFixed(1);
 
-    // 2. Jitter (compute from ping samples, push to chart)
-    const jitterVals = [];
-    for (let i = 1; i < pingResult.pings.length; i++) {
-      const j = Math.abs(pingResult.pings[i] - pingResult.pings[i - 1]);
-      jitterVals.push(j);
-      pushChartPoint(charts.jitter, j);
-    }
+    // 2. Jitter (already pushed live during ping)
     results.jitter_ms = parseFloat(calcJitter(pingResult.pings).toFixed(2));
     $('val-jitter').textContent = results.jitter_ms.toFixed(1);
     $('live-jitter-val').textContent = results.jitter_ms.toFixed(1);

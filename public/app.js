@@ -2,35 +2,92 @@
 // Speed Test Client — nerifeige.com
 // ================================================================
 
-const CIRCUMFERENCE = 2 * Math.PI * 88; // gauge circle r=88
 let running = false;
 let map = null;
 
-// ── DOM refs ────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
-const gaugeValue  = $('gauge-value');
-const gaugeLabel  = $('gauge-label');
-const gaugePhase  = $('gauge-phase');
-const gaugeFill   = $('gauge-fill');
 const startBtn    = $('start-btn');
 const btnText     = $('btn-text');
 const progressBar = $('test-progress');
 const progressFill = $('test-progress-fill');
 
-// ── Gauge helpers ───────────────────────────────────────────────
-function setGauge(fraction, cls) {
-  const offset = CIRCUMFERENCE * (1 - Math.min(1, fraction));
-  gaugeFill.style.strokeDashoffset = offset;
-  gaugeFill.className.baseVal = 'gauge-fill' + (cls ? ' ' + cls : '');
+// ── Live Charts (Chart.js) ──────────────────────────────────────
+const CHART_MAX_POINTS = 60;
+
+const chartOpts = (color, unit) => ({
+  responsive: true,
+  maintainAspectRatio: false,
+  animation: { duration: 0 },
+  plugins: { legend: { display: false }, tooltip: { enabled: false } },
+  scales: {
+    x: { display: false },
+    y: {
+      display: true,
+      beginAtZero: true,
+      grid: { color: 'rgba(255,255,255,0.04)', drawBorder: false },
+      ticks: {
+        font: { size: 9, family: 'monospace' },
+        color: '#5a5a6a',
+        maxTicksLimit: 3,
+        callback: v => v + ' ' + unit
+      }
+    }
+  },
+  elements: {
+    point: { radius: 0 },
+    line: { borderWidth: 1.5, tension: 0.3 }
+  }
+});
+
+function makeChart(canvasId, color, unit) {
+  return new Chart($(canvasId), {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [{
+        data: [],
+        borderColor: color,
+        backgroundColor: color + '18',
+        fill: true
+      }]
+    },
+    options: chartOpts(color, unit)
+  });
 }
 
+const charts = {};
+document.addEventListener('DOMContentLoaded', () => {
+  charts.dl     = makeChart('chart-dl',     '#3b82f6', 'Mb/s');
+  charts.ul     = makeChart('chart-ul',     '#a78bfa', 'Mb/s');
+  charts.ping   = makeChart('chart-ping',   '#22c55e', 'ms');
+  charts.jitter = makeChart('chart-jitter', '#f59e0b', 'ms');
+});
+
+function pushChartPoint(chart, value) {
+  const d = chart.data;
+  d.labels.push('');
+  d.datasets[0].data.push(value);
+  if (d.labels.length > CHART_MAX_POINTS) {
+    d.labels.shift();
+    d.datasets[0].data.shift();
+  }
+  chart.update('none');
+}
+
+function resetChart(chart) {
+  chart.data.labels = [];
+  chart.data.datasets[0].data = [];
+  chart.update('none');
+}
+
+// ── Helpers ─────────────────────────────────────────────────────
 function setProgress(pct, cls) {
   progressFill.style.width = pct + '%';
   progressFill.className = 'test-progress-fill' + (cls ? ' ' + cls : '');
 }
 
 function setPhase(text) {
-  gaugePhase.textContent = text;
+  $('gauge-phase').textContent = text;
 }
 
 // ── Ping measurement ────────────────────────────────────────────
@@ -42,16 +99,14 @@ async function measurePing(samples = 20) {
     const rtt = performance.now() - t0;
     pings.push(rtt);
 
-    gaugeValue.textContent = rtt.toFixed(1);
-    gaugeLabel.textContent = 'ms';
-    setGauge(Math.min(rtt / 100, 1), 'ping');
+    $('live-ping-val').textContent = rtt.toFixed(1);
+    pushChartPoint(charts.ping, rtt);
     setProgress((i + 1) / samples * 100, 'ping');
   }
   const avg = pings.reduce((a, b) => a + b) / pings.length;
   return { avg, pings };
 }
 
-// ── Jitter measurement ──────────────────────────────────────────
 function calcJitter(pings) {
   if (pings.length < 2) return 0;
   let sum = 0;
@@ -63,10 +118,12 @@ function calcJitter(pings) {
 
 // ── Download measurement ────────────────────────────────────────
 async function measureDownload(durationMs = 10000) {
-  const chunkSize = 4_000_000;
+  const chunkSize = 10_000_000;
   let totalBytes = 0;
   const startTime = performance.now();
   let lastUpdate = startTime;
+  let lastBytes = 0;
+  let lastTime = startTime;
 
   while (performance.now() - startTime < durationMs) {
     const resp = await fetch('/api/download?size=' + chunkSize + '&_=' + Date.now(), {
@@ -75,15 +132,19 @@ async function measureDownload(durationMs = 10000) {
     const data = await resp.arrayBuffer();
     totalBytes += data.byteLength;
 
-    const elapsed = (performance.now() - startTime) / 1000;
-    const mbps = (totalBytes * 8) / (elapsed * 1_000_000);
+    const now = performance.now();
+    if (now - lastUpdate > 200) {
+      const intervalBytes = totalBytes - lastBytes;
+      const intervalTime = (now - lastTime) / 1000;
+      const instantMbps = (intervalBytes * 8) / (intervalTime * 1_000_000);
 
-    if (performance.now() - lastUpdate > 100) {
-      gaugeValue.textContent = mbps.toFixed(1);
-      gaugeLabel.textContent = 'Mbit/s';
-      setGauge(Math.min(mbps / 100, 1), '');
-      setProgress(Math.min((performance.now() - startTime) / durationMs * 100, 100), '');
-      lastUpdate = performance.now();
+      $('live-dl-val').textContent = instantMbps.toFixed(1);
+      pushChartPoint(charts.dl, instantMbps);
+      setProgress(Math.min((now - startTime) / durationMs * 100, 100), '');
+
+      lastBytes = totalBytes;
+      lastTime = now;
+      lastUpdate = now;
     }
   }
 
@@ -94,10 +155,12 @@ async function measureDownload(durationMs = 10000) {
 
 // ── Upload measurement ──────────────────────────────────────────
 async function measureUpload(durationMs = 10000) {
-  const chunkSize = 2_000_000;
+  const chunkSize = 4_000_000;
   let totalBytes = 0;
   const startTime = performance.now();
   let lastUpdate = startTime;
+  let lastBytes = 0;
+  let lastTime = startTime;
   const payload = new Uint8Array(chunkSize);
 
   while (performance.now() - startTime < durationMs) {
@@ -110,15 +173,19 @@ async function measureUpload(durationMs = 10000) {
     const result = await resp.json();
     totalBytes += result.bytes;
 
-    const elapsed = (performance.now() - startTime) / 1000;
-    const mbps = (totalBytes * 8) / (elapsed * 1_000_000);
+    const now = performance.now();
+    if (now - lastUpdate > 200) {
+      const intervalBytes = totalBytes - lastBytes;
+      const intervalTime = (now - lastTime) / 1000;
+      const instantMbps = (intervalBytes * 8) / (intervalTime * 1_000_000);
 
-    if (performance.now() - lastUpdate > 100) {
-      gaugeValue.textContent = mbps.toFixed(1);
-      gaugeLabel.textContent = 'Mbit/s';
-      setGauge(Math.min(mbps / 100, 1), 'upload');
-      setProgress(Math.min((performance.now() - startTime) / durationMs * 100, 100), 'upload');
-      lastUpdate = performance.now();
+      $('live-ul-val').textContent = instantMbps.toFixed(1);
+      pushChartPoint(charts.ul, instantMbps);
+      setProgress(Math.min((now - startTime) / durationMs * 100, 100), 'upload');
+
+      lastBytes = totalBytes;
+      lastTime = now;
+      lastUpdate = now;
     }
   }
 
@@ -130,9 +197,6 @@ async function measureUpload(durationMs = 10000) {
 // ── Traceroute ──────────────────────────────────────────────────
 async function runTraceroute() {
   setPhase('Traceroute');
-  gaugeValue.textContent = '...';
-  gaugeLabel.textContent = 'tracing';
-  setGauge(0.5, 'traceroute');
   setProgress(50, 'traceroute');
 
   try {
@@ -142,12 +206,8 @@ async function runTraceroute() {
     const hops = data.hops || [];
 
     $('hop-count').textContent = hops.length + ' hops';
-    gaugeValue.textContent = hops.length;
-    gaugeLabel.textContent = 'hops';
-    setGauge(1, 'traceroute');
     setProgress(100, 'traceroute');
 
-    // Get geo data for hop IPs
     const ips = hops.map(h => h.ip).filter(Boolean);
     let geoData = {};
     if (ips.length > 0) {
@@ -178,7 +238,7 @@ function renderMap(hops, geoData) {
   map = L.map('map', {
     zoomControl: true,
     attributionControl: true
-  }).setView([30, 0], 2);
+  }).setView([48, 11], 5);
 
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
     attribution: '&copy; OSM &copy; CARTO',
@@ -194,12 +254,12 @@ function renderMap(hops, geoData) {
 
     const rttClass = hop.rtt == null ? '' : hop.rtt < 20 ? 'fast' : hop.rtt < 80 ? 'mid' : 'slow';
     const color = rttClass === 'fast' ? '#22c55e' : rttClass === 'mid' ? '#f59e0b' : '#ef4444';
-    const radius = hop.hop === 1 ? 6 : hop.hop === hops.length ? 6 : 4;
+    const isEndpoint = hop.hop === 1 || hop.hop === hops[hops.length - 1]?.hop;
 
     const marker = L.circleMarker([geo.lat, geo.lon], {
-      radius,
+      radius: isEndpoint ? 7 : 4,
       fillColor: color,
-      color: 'rgba(255,255,255,0.2)',
+      color: 'rgba(255,255,255,0.3)',
       weight: 1,
       fillOpacity: 0.9
     }).addTo(map);
@@ -207,7 +267,7 @@ function renderMap(hops, geoData) {
     const label = `Hop ${hop.hop}: ${hop.ip}` +
       (geo.city ? ` (${geo.city})` : '') +
       (hop.rtt != null ? ` — ${hop.rtt.toFixed(1)}ms` : '');
-    marker.bindTooltip(label, { className: 'hop-tooltip' });
+    marker.bindTooltip(label);
 
     points.push([geo.lat, geo.lon]);
   }
@@ -215,12 +275,16 @@ function renderMap(hops, geoData) {
   if (points.length >= 2) {
     L.polyline(points, {
       color: '#3b82f6',
-      weight: 2,
-      opacity: 0.6,
+      weight: 2.5,
+      opacity: 0.7,
       dashArray: '6 4'
     }).addTo(map);
 
-    map.fitBounds(L.latLngBounds(points).pad(0.3));
+    // Fit to route bounds, but limit max zoom to keep context
+    const bounds = L.latLngBounds(points).pad(0.2);
+    map.fitBounds(bounds, { maxZoom: 7 });
+  } else if (points.length === 1) {
+    map.setView(points[0], 6);
   }
 }
 
@@ -265,11 +329,16 @@ async function startTest() {
   progressBar.classList.add('active');
   $('map-section').style.display = 'none';
 
-  // Reset values
+  // Reset
   $('val-download').textContent = '--';
   $('val-upload').textContent = '--';
   $('val-ping').textContent = '--';
   $('val-jitter').textContent = '--';
+  $('live-dl-val').textContent = '--';
+  $('live-ul-val').textContent = '--';
+  $('live-ping-val').textContent = '--';
+  $('live-jitter-val').textContent = '--';
+  Object.values(charts).forEach(resetChart);
 
   const testStart = performance.now();
   let results = {};
@@ -280,10 +349,18 @@ async function startTest() {
     const pingResult = await measurePing(20);
     results.ping_ms = parseFloat(pingResult.avg.toFixed(2));
     $('val-ping').textContent = results.ping_ms.toFixed(1);
+    $('live-ping-val').textContent = results.ping_ms.toFixed(1);
 
-    // 2. Jitter
+    // 2. Jitter (compute from ping samples, push to chart)
+    const jitterVals = [];
+    for (let i = 1; i < pingResult.pings.length; i++) {
+      const j = Math.abs(pingResult.pings[i] - pingResult.pings[i - 1]);
+      jitterVals.push(j);
+      pushChartPoint(charts.jitter, j);
+    }
     results.jitter_ms = parseFloat(calcJitter(pingResult.pings).toFixed(2));
     $('val-jitter').textContent = results.jitter_ms.toFixed(1);
+    $('live-jitter-val').textContent = results.jitter_ms.toFixed(1);
 
     // 3. Download
     setPhase('Download');
@@ -291,6 +368,7 @@ async function startTest() {
     results.download_mbps = parseFloat(dlResult.mbps.toFixed(2));
     results.download_bytes = dlResult.bytes;
     $('val-download').textContent = results.download_mbps.toFixed(1);
+    $('live-dl-val').textContent = results.download_mbps.toFixed(1);
 
     // 4. Upload
     setPhase('Upload');
@@ -298,35 +376,36 @@ async function startTest() {
     results.upload_mbps = parseFloat(ulResult.mbps.toFixed(2));
     results.upload_bytes = ulResult.bytes;
     $('val-upload').textContent = results.upload_mbps.toFixed(1);
+    $('live-ul-val').textContent = results.upload_mbps.toFixed(1);
 
-    // 5. Traceroute (runs parallel-ish, after main test)
+    // 5. Traceroute
     await runTraceroute();
 
     // Duration
     results.duration_s = parseFloat(((performance.now() - testStart) / 1000).toFixed(2));
 
     // Connection hints
-    const connInfo = getConnectionInfo();
-    Object.assign(results, connInfo);
+    Object.assign(results, getConnectionInfo());
 
-    // Save to DB (silent, no UI feedback)
-    fetch('/api/result', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(results)
-    }).catch(() => {});
+    // Save to DB
+    try {
+      const saveResp = await fetch('/api/result', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(results)
+      });
+      const saveData = await saveResp.json();
+      if (!saveResp.ok) console.error('Save failed:', saveData);
+      else console.log('Result saved:', saveData);
+    } catch (e) {
+      console.error('Save error:', e);
+    }
 
-    // Final gauge state
     setPhase('Complete');
-    gaugeValue.textContent = results.download_mbps.toFixed(0);
-    gaugeLabel.textContent = 'Mbit/s';
-    setGauge(Math.min(results.download_mbps / 100, 1), '');
 
   } catch (err) {
     console.error('Test error:', err);
     setPhase('Error');
-    gaugeValue.textContent = '!';
-    gaugeLabel.textContent = 'failed';
   }
 
   progressBar.classList.remove('active');

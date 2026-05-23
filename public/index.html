@@ -7,6 +7,7 @@
   <link rel="icon" type="image/x-icon" href="/favicon.ico">
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -49,28 +50,45 @@
       </div>
     </div>
 
-    <!-- Gauge area -->
-    <div class="gauge-section">
-      <div class="gauge-ring" id="gauge-ring">
-        <svg viewBox="0 0 200 200" class="gauge-svg">
-          <circle cx="100" cy="100" r="88" class="gauge-track"/>
-          <circle cx="100" cy="100" r="88" class="gauge-fill" id="gauge-fill"
-                  stroke-dasharray="553" stroke-dashoffset="553"/>
-        </svg>
-        <div class="gauge-center">
-          <div class="gauge-value" id="gauge-value">--</div>
-          <div class="gauge-label" id="gauge-label">Mbit/s</div>
+    <!-- Live graphs (4 side by side) -->
+    <div class="live-graphs">
+      <div class="live-graph-box">
+        <div class="live-graph-header">
+          <span class="live-graph-label">Download</span>
+          <span class="live-graph-val" id="live-dl-val">--</span>
         </div>
+        <div class="live-chart-wrap"><canvas id="chart-dl"></canvas></div>
       </div>
-      <div class="gauge-phase" id="gauge-phase">Ready</div>
+      <div class="live-graph-box">
+        <div class="live-graph-header">
+          <span class="live-graph-label">Upload</span>
+          <span class="live-graph-val upload" id="live-ul-val">--</span>
+        </div>
+        <div class="live-chart-wrap"><canvas id="chart-ul"></canvas></div>
+      </div>
+      <div class="live-graph-box">
+        <div class="live-graph-header">
+          <span class="live-graph-label">Ping</span>
+          <span class="live-graph-val ping" id="live-ping-val">--</span>
+        </div>
+        <div class="live-chart-wrap"><canvas id="chart-ping"></canvas></div>
+      </div>
+      <div class="live-graph-box">
+        <div class="live-graph-header">
+          <span class="live-graph-label">Jitter</span>
+          <span class="live-graph-val jitter" id="live-jitter-val">--</span>
+        </div>
+        <div class="live-chart-wrap"><canvas id="chart-jitter"></canvas></div>
+      </div>
     </div>
 
-    <!-- Start button -->
+    <!-- Phase + Start button -->
+    <div class="phase-text" id="gauge-phase">Ready</div>
+
     <button class="start-btn" id="start-btn" onclick="startTest()">
       <span id="btn-text">Start</span>
     </button>
 
-    <!-- Progress bar -->
     <div class="test-progress" id="test-progress">
       <div class="test-progress-fill" id="test-progress-fill"></div>
     </div>

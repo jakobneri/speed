@@ -19,13 +19,16 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.raw({ type: 'application/octet-stream', limit: '50mb' }));
 app.use(express.static(path.join(__dirname, '../public')));
 
-// --- Ping endpoint (minimal response for latency measurement) ---
+// Pre-generate random buffer (avoids crypto.randomBytes per request on Pi)
+const DOWNLOAD_BUFFER = crypto.randomBytes(1_000_000);
+
+// --- Ping endpoint ---
 app.get('/api/ping', (req, res) => {
   res.set('Cache-Control', 'no-store');
   res.send('');
 });
 
-// --- Download endpoint (generates random data) ---
+// --- Download endpoint (serves pre-generated data, fast on Pi) ---
 app.get('/api/download', (req, res) => {
   const size = Math.min(parseInt(req.query.size) || 1_000_000, 25_000_000);
   res.set({
@@ -33,14 +36,13 @@ app.get('/api/download', (req, res) => {
     'Content-Length': size,
     'Cache-Control': 'no-store'
   });
-  const chunkSize = 65536;
   let remaining = size;
   function sendChunk() {
     while (remaining > 0) {
-      const len = Math.min(chunkSize, remaining);
-      const buf = crypto.randomBytes(len);
+      const len = Math.min(DOWNLOAD_BUFFER.length, remaining);
+      const chunk = len === DOWNLOAD_BUFFER.length ? DOWNLOAD_BUFFER : DOWNLOAD_BUFFER.subarray(0, len);
       remaining -= len;
-      if (!res.write(buf)) {
+      if (!res.write(chunk)) {
         res.once('drain', sendChunk);
         return;
       }
@@ -50,7 +52,7 @@ app.get('/api/download', (req, res) => {
   sendChunk();
 });
 
-// --- Upload endpoint (receives data, measures throughput) ---
+// --- Upload endpoint ---
 app.post('/api/upload', (req, res) => {
   const bytes = req.body ? req.body.length : 0;
   res.json({ bytes });
@@ -116,12 +118,12 @@ function parseTraceroute(output, isWin) {
   return hops;
 }
 
-// --- IP info lookup (free, no API key) ---
+// --- IP info lookup ---
 async function lookupIp(ip) {
   try {
     const cleanIp = ip.replace('::ffff:', '');
-    if (cleanIp === '127.0.0.1' || cleanIp.startsWith('192.168.') || cleanIp.startsWith('10.')) {
-      return { isp: 'Local Network', location: 'Local', lat: null, lon: null };
+    if (cleanIp === '127.0.0.1' || cleanIp.startsWith('192.168.') || cleanIp.startsWith('10.') || cleanIp.startsWith('172.')) {
+      return { isp: 'Local Network', city: 'Local', country: '', lat: null, lon: null };
     }
     const resp = await fetch(`http://ip-api.com/json/${cleanIp}?fields=isp,city,country,lat,lon`);
     if (resp.ok) return await resp.json();
@@ -158,7 +160,7 @@ app.post('/api/result', async (req, res) => {
       isp: ipInfo.isp || 'Unknown',
       server_ip: req.body.server_ip || null,
       user_agent: req.headers['user-agent'] || '',
-      location: ipInfo.city && ipInfo.country ? `${ipInfo.city}, ${ipInfo.country}` : 'Unknown',
+      location: ipInfo.city && ipInfo.country ? `${ipInfo.city}, ${ipInfo.country}` : ipInfo.city || 'Unknown',
       connection_type: req.body.connection_type || null,
       downlink_hint: req.body.downlink_hint || null,
       rtt_hint: req.body.rtt_hint || null,
@@ -167,6 +169,7 @@ app.post('/api/result', async (req, res) => {
       upload_bytes: req.body.upload_bytes || null
     };
 
+    console.log('Saving result to DB:', DB_URL + '/speedtest_results');
     const dbRes = await fetch(`${DB_URL}/speedtest_results`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
@@ -175,11 +178,13 @@ app.post('/api/result', async (req, res) => {
 
     if (!dbRes.ok) {
       const err = await dbRes.text();
-      console.error('DB save failed:', err);
-      return res.status(500).json({ error: 'Failed to save result' });
+      console.error('DB save failed:', dbRes.status, err);
+      return res.status(500).json({ error: 'Failed to save result', detail: err });
     }
 
-    res.json({ saved: true });
+    const saved = await dbRes.json();
+    console.log('Result saved, id:', saved[0]?.id);
+    res.json({ saved: true, id: saved[0]?.id });
   } catch (err) {
     console.error('Result save error:', err.message);
     res.status(500).json({ error: err.message });
@@ -193,5 +198,5 @@ app.get('{*path}', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`\n  speed test server | http://localhost:${PORT} | traceroute target: ${TRACEROUTE_TARGET}\n`);
+  console.log(`\n  speed test server | http://localhost:${PORT} | DB: ${DB_URL} | trace: ${TRACEROUTE_TARGET}\n`);
 });

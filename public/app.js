@@ -14,7 +14,7 @@ const progressFill = $('test-progress-fill');
 // ── Live Charts (Chart.js) ──────────────────────────────────────
 const CHART_MAX_POINTS = 60;
 
-const chartOpts = (color, unit) => ({
+const chartOpts = (color, unit, sugMax) => ({
   responsive: true,
   maintainAspectRatio: false,
   animation: { duration: 0 },
@@ -24,6 +24,7 @@ const chartOpts = (color, unit) => ({
     y: {
       display: true,
       beginAtZero: true,
+      ...(sugMax ? { suggestedMax: sugMax } : {}),
       grid: { color: 'rgba(255,255,255,0.04)', drawBorder: false },
       ticks: {
         font: { size: 9, family: 'monospace' },
@@ -39,7 +40,7 @@ const chartOpts = (color, unit) => ({
   }
 });
 
-function makeChart(canvasId, color, unit) {
+function makeChart(canvasId, color, unit, sugMax) {
   return new Chart($(canvasId), {
     type: 'line',
     data: {
@@ -51,7 +52,7 @@ function makeChart(canvasId, color, unit) {
         fill: true
       }]
     },
-    options: chartOpts(color, unit)
+    options: chartOpts(color, unit, sugMax)
   });
 }
 
@@ -60,7 +61,7 @@ document.addEventListener('DOMContentLoaded', () => {
   charts.dl     = makeChart('chart-dl',     '#3b82f6', 'Mb/s');
   charts.ul     = makeChart('chart-ul',     '#a78bfa', 'Mb/s');
   charts.ping   = makeChart('chart-ping',   '#22c55e', 'ms');
-  charts.jitter = makeChart('chart-jitter', '#f59e0b', 'ms');
+  charts.jitter = makeChart('chart-jitter', '#f59e0b', 'ms', 15);
 });
 
 function pushChartPoint(chart, value) {
@@ -92,6 +93,11 @@ function setPhase(text) {
 
 // ── Ping measurement ────────────────────────────────────────────
 async function measurePing(samples = 20) {
+  // Warm-up: 3 pings to establish TCP/TLS keep-alive (not counted)
+  for (let w = 0; w < 3; w++) {
+    await fetch('/api/ping?_=' + Date.now(), { cache: 'no-store' });
+  }
+
   const pings = [];
   for (let i = 0; i < samples; i++) {
     const t0 = performance.now();
@@ -121,78 +127,132 @@ function calcJitter(pings) {
   return sum / (pings.length - 1);
 }
 
-// ── Download measurement ────────────────────────────────────────
+// ── Download measurement (parallel streams) ─────────────────────
 async function measureDownload(durationMs = 10000) {
-  const chunkSize = 10_000_000;
+  const STREAMS = 6;
+  const chunkSize = 25_000_000;
   let totalBytes = 0;
+  let stop = false;
   const startTime = performance.now();
-  let lastUpdate = startTime;
   let lastBytes = 0;
   let lastTime = startTime;
+  const controller = new AbortController();
 
-  while (performance.now() - startTime < durationMs) {
-    const resp = await fetch('/api/download?size=' + chunkSize + '&_=' + Date.now(), {
-      cache: 'no-store'
-    });
-    const data = await resp.arrayBuffer();
-    totalBytes += data.byteLength;
-
-    const now = performance.now();
-    if (now - lastUpdate > 200) {
-      const intervalBytes = totalBytes - lastBytes;
-      const intervalTime = (now - lastTime) / 1000;
-      const instantMbps = (intervalBytes * 8) / (intervalTime * 1_000_000);
-
-      $('live-dl-val').textContent = instantMbps.toFixed(1);
-      pushChartPoint(charts.dl, instantMbps);
-      setProgress(Math.min((now - startTime) / durationMs * 100, 100), '');
-
-      lastBytes = totalBytes;
-      lastTime = now;
-      lastUpdate = now;
+  // Each worker streams chunks via ReadableStream for progressive byte counting
+  async function dlWorker() {
+    while (!stop) {
+      try {
+        const resp = await fetch('/api/download?size=' + chunkSize + '&_=' + Math.random(), {
+          cache: 'no-store',
+          signal: controller.signal
+        });
+        const reader = resp.body.getReader();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done || stop) break;
+            totalBytes += value.length;
+          }
+        } finally {
+          reader.releaseLock();
+        }
+      } catch (e) {
+        if (e.name === 'AbortError') break;
+        if (!stop) await new Promise(r => setTimeout(r, 50));
+      }
     }
   }
+
+  // UI update timer — fires every 250ms for smooth chart
+  const uiTimer = setInterval(() => {
+    const now = performance.now();
+    const elapsed = now - startTime;
+    const intervalBytes = totalBytes - lastBytes;
+    const intervalTime = (now - lastTime) / 1000;
+
+    if (intervalBytes > 0 && intervalTime > 0.05) {
+      const instantMbps = (intervalBytes * 8) / (intervalTime * 1_000_000);
+      $('live-dl-val').textContent = instantMbps.toFixed(1);
+      pushChartPoint(charts.dl, instantMbps);
+      lastBytes = totalBytes;
+      lastTime = now;
+    }
+    setProgress(Math.min(elapsed / durationMs * 100, 100), '');
+  }, 250);
+
+  // Launch all workers concurrently
+  const workers = Array.from({ length: STREAMS }, () => dlWorker());
+
+  // Stop after duration
+  await new Promise(r => setTimeout(r, durationMs));
+  stop = true;
+  controller.abort();
+  clearInterval(uiTimer);
+
+  // Wait for in-flight requests to finish
+  await Promise.allSettled(workers);
 
   const totalTime = (performance.now() - startTime) / 1000;
   const mbps = (totalBytes * 8) / (totalTime * 1_000_000);
   return { mbps, bytes: totalBytes, duration: totalTime };
 }
 
-// ── Upload measurement ──────────────────────────────────────────
+// ── Upload measurement (parallel streams) ───────────────────────
 async function measureUpload(durationMs = 10000) {
-  const chunkSize = 4_000_000;
+  const STREAMS = 4;
+  const chunkSize = 2_000_000;
   let totalBytes = 0;
+  let stop = false;
   const startTime = performance.now();
-  let lastUpdate = startTime;
   let lastBytes = 0;
   let lastTime = startTime;
   const payload = new Uint8Array(chunkSize);
+  const controller = new AbortController();
 
-  while (performance.now() - startTime < durationMs) {
-    const resp = await fetch('/api/upload', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/octet-stream' },
-      body: payload,
-      cache: 'no-store'
-    });
-    const result = await resp.json();
-    totalBytes += result.bytes;
-
-    const now = performance.now();
-    if (now - lastUpdate > 200) {
-      const intervalBytes = totalBytes - lastBytes;
-      const intervalTime = (now - lastTime) / 1000;
-      const instantMbps = (intervalBytes * 8) / (intervalTime * 1_000_000);
-
-      $('live-ul-val').textContent = instantMbps.toFixed(1);
-      pushChartPoint(charts.ul, instantMbps);
-      setProgress(Math.min((now - startTime) / durationMs * 100, 100), 'upload');
-
-      lastBytes = totalBytes;
-      lastTime = now;
-      lastUpdate = now;
+  async function ulWorker() {
+    while (!stop) {
+      try {
+        const resp = await fetch('/api/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: payload,
+          cache: 'no-store',
+          signal: controller.signal
+        });
+        const result = await resp.json();
+        if (!stop) totalBytes += result.bytes;
+      } catch (e) {
+        if (e.name === 'AbortError') break;
+        if (!stop) await new Promise(r => setTimeout(r, 50));
+      }
     }
   }
+
+  // UI update timer
+  const uiTimer = setInterval(() => {
+    const now = performance.now();
+    const elapsed = now - startTime;
+    const intervalBytes = totalBytes - lastBytes;
+    const intervalTime = (now - lastTime) / 1000;
+
+    if (intervalBytes > 0 && intervalTime > 0.05) {
+      const instantMbps = (intervalBytes * 8) / (intervalTime * 1_000_000);
+      $('live-ul-val').textContent = instantMbps.toFixed(1);
+      pushChartPoint(charts.ul, instantMbps);
+      lastBytes = totalBytes;
+      lastTime = now;
+    }
+    setProgress(Math.min(elapsed / durationMs * 100, 100), 'upload');
+  }, 250);
+
+  const workers = Array.from({ length: STREAMS }, () => ulWorker());
+
+  await new Promise(r => setTimeout(r, durationMs));
+  stop = true;
+  controller.abort();
+  clearInterval(uiTimer);
+
+  await Promise.allSettled(workers);
 
   const totalTime = (performance.now() - startTime) / 1000;
   const mbps = (totalBytes * 8) / (totalTime * 1_000_000);
@@ -362,7 +422,7 @@ async function startTest() {
     $('val-jitter').textContent = results.jitter_ms.toFixed(1);
     $('live-jitter-val').textContent = results.jitter_ms.toFixed(1);
 
-    // 3. Download
+    // 3. Download (6 parallel streams)
     setPhase('Download');
     const dlResult = await measureDownload(10000);
     results.download_mbps = parseFloat(dlResult.mbps.toFixed(2));
@@ -370,7 +430,7 @@ async function startTest() {
     $('val-download').textContent = results.download_mbps.toFixed(1);
     $('live-dl-val').textContent = results.download_mbps.toFixed(1);
 
-    // 4. Upload
+    // 4. Upload (4 parallel streams)
     setPhase('Upload');
     const ulResult = await measureUpload(10000);
     results.upload_mbps = parseFloat(ulResult.mbps.toFixed(2));

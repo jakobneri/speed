@@ -76,7 +76,15 @@ function rateLimit(bucket, max) {
   };
 }
 
-app.use(express.static(path.join(__dirname, '../public')));
+app.use(express.static(path.join(__dirname, '../public'), {
+  etag: true,
+  lastModified: true,
+  setHeaders(res, filePath) {
+    if (/\.(html|js|css)$/.test(filePath)) {
+      res.set('Cache-Control', 'no-cache');
+    }
+  }
+}));
 
 // Pre-generate large buffer (reusable, zero CPU per request)
 const DOWNLOAD_BUFFER = crypto.randomBytes(1_000_000);

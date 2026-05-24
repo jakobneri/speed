@@ -5,8 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Speed Test — nerifeige.com</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico">
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <link rel="stylesheet" href="/style.css">
 </head>
@@ -14,102 +13,146 @@
   <div class="speed-container">
 
     <header class="speed-header">
-      <small>nerifeige.com</small>
-      <h1>speed test</h1>
+      <div class="header-left">
+        <span class="header-icon">&#9889;</span>
+        <span class="header-title">Speed Test</span>
+      </div>
+      <div class="header-right">nerifeige.com</div>
     </header>
 
-    <!-- Stat strip -->
-    <div class="stat-strip" id="stat-strip">
-      <div class="stat-item">
-        <span class="stat-label">Download</span>
-        <span class="stat-value">
-          <span id="val-download">--</span>
-          <span class="stat-unit">Mbit/s</span>
-        </span>
+    <!-- Main Results -->
+    <div class="results-grid">
+      <div class="speed-section">
+        <h2 class="section-title">Your Internet Speed</h2>
+        <div class="speed-panels">
+          <div class="speed-panel">
+            <span class="panel-label">Download</span>
+            <div class="panel-value">
+              <span class="big-number" id="val-download">--</span>
+              <span class="big-unit">Mbps</span>
+            </div>
+            <div class="panel-chart"><canvas id="chart-dl"></canvas></div>
+            <div class="panel-percentiles" id="dl-percentiles"></div>
+          </div>
+          <div class="speed-panel">
+            <span class="panel-label">Upload</span>
+            <div class="panel-value">
+              <span class="big-number upload" id="val-upload">--</span>
+              <span class="big-unit">Mbps</span>
+            </div>
+            <div class="panel-chart"><canvas id="chart-ul"></canvas></div>
+            <div class="panel-percentiles" id="ul-percentiles"></div>
+          </div>
+        </div>
       </div>
-      <div class="stat-item">
-        <span class="stat-label">Upload</span>
-        <span class="stat-value">
-          <span id="val-upload">--</span>
-          <span class="stat-unit">Mbit/s</span>
-        </span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-label">Ping</span>
-        <span class="stat-value">
-          <span id="val-ping">--</span>
-          <span class="stat-unit">ms</span>
-        </span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-label">Jitter</span>
-        <span class="stat-value">
-          <span id="val-jitter">--</span>
-          <span class="stat-unit">ms</span>
-        </span>
+
+      <div class="stats-sidebar">
+        <div class="stat-card">
+          <span class="stat-label">Latency</span>
+          <div class="stat-value">
+            <span class="stat-number green" id="val-ping">--</span>
+            <span class="stat-unit">ms</span>
+          </div>
+          <div class="stat-sub">
+            <span>&#8595; <span id="val-dl-latency">--</span> ms</span>
+            <span>&#8593; <span id="val-ul-latency">--</span> ms</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Jitter</span>
+          <div class="stat-value">
+            <span class="stat-number amber" id="val-jitter">--</span>
+            <span class="stat-unit">ms</span>
+          </div>
+          <div class="stat-sub">
+            <span>&#8595; <span id="val-dl-jitter">--</span> ms</span>
+            <span>&#8593; <span id="val-ul-jitter">--</span> ms</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Packet Loss</span>
+          <div class="stat-value">
+            <span class="stat-number" id="val-packet-loss">--</span>
+            <span class="stat-unit">%</span>
+          </div>
+        </div>
+        <div class="connection-info">
+          <div class="conn-row"><span class="conn-dot"></span>Connected via <span id="conn-type">--</span></div>
+          <div class="conn-row"><span class="conn-dot"></span>Server: <span id="server-loc">nerifeige.com</span></div>
+          <div class="conn-row"><span class="conn-dot"></span>Network: <span id="isp-name">--</span></div>
+          <div class="conn-row"><span class="conn-dot"></span>IP: <span id="client-ip">--</span></div>
+        </div>
       </div>
     </div>
 
-    <!-- Live graphs (4 side by side) -->
-    <div class="live-graphs">
-      <div class="live-graph-box">
-        <div class="live-graph-header">
-          <span class="live-graph-label">Download</span>
-          <span class="live-graph-val" id="live-dl-val">--</span>
-        </div>
-        <div class="live-chart-wrap"><canvas id="chart-dl"></canvas></div>
+    <!-- Controls -->
+    <div class="controls-bar">
+      <button class="btn" id="start-btn" onclick="startTest()">
+        <span id="btn-text">Start Test</span>
+      </button>
+      <span class="phase-text" id="gauge-phase"></span>
+      <div class="test-progress" id="test-progress">
+        <div class="test-progress-fill" id="test-progress-fill"></div>
       </div>
-      <div class="live-graph-box">
-        <div class="live-graph-header">
-          <span class="live-graph-label">Upload</span>
-          <span class="live-graph-val upload" id="live-ul-val">--</span>
+      <span class="measured-at" id="measured-at"></span>
+    </div>
+
+    <!-- Network Quality Score -->
+    <div class="quality-section" id="quality-section" style="display:none">
+      <h2 class="section-title">Network Quality Score</h2>
+      <div class="quality-grid">
+        <div class="quality-item">
+          <span class="quality-label">Video Streaming</span>
+          <span class="quality-dot" id="q-streaming-dot"></span>
+          <span class="quality-rating" id="q-streaming">--</span>
         </div>
-        <div class="live-chart-wrap"><canvas id="chart-ul"></canvas></div>
-      </div>
-      <div class="live-graph-box">
-        <div class="live-graph-header">
-          <span class="live-graph-label">Ping</span>
-          <span class="live-graph-val ping" id="live-ping-val">--</span>
+        <span class="quality-sep">&middot;</span>
+        <div class="quality-item">
+          <span class="quality-label">Online Gaming</span>
+          <span class="quality-dot" id="q-gaming-dot"></span>
+          <span class="quality-rating" id="q-gaming">--</span>
         </div>
-        <div class="live-chart-wrap"><canvas id="chart-ping"></canvas></div>
-      </div>
-      <div class="live-graph-box">
-        <div class="live-graph-header">
-          <span class="live-graph-label">Jitter</span>
-          <span class="live-graph-val jitter" id="live-jitter-val">--</span>
+        <span class="quality-sep">&middot;</span>
+        <div class="quality-item">
+          <span class="quality-label">Video Chatting</span>
+          <span class="quality-dot" id="q-video-dot"></span>
+          <span class="quality-rating" id="q-video">--</span>
         </div>
-        <div class="live-chart-wrap"><canvas id="chart-jitter"></canvas></div>
       </div>
     </div>
 
-    <!-- Phase + Start button -->
-    <div class="phase-text" id="gauge-phase">Ready</div>
-
-    <button class="start-btn" id="start-btn" onclick="startTest()">
-      <span id="btn-text">Start</span>
-    </button>
-
-    <div class="test-progress" id="test-progress">
-      <div class="test-progress-fill" id="test-progress-fill"></div>
-    </div>
-
-    <!-- Traceroute map -->
-    <div class="map-section" id="map-section" style="display:none;">
-      <div class="section-header">
-        <span class="section-label">Route to Cloudflare (1.1.1.1)</span>
-        <span class="hop-count" id="hop-count">-- hops</span>
+    <!-- Detailed Measurements -->
+    <div class="measurements-section" id="measurements-section" style="display:none">
+      <div class="measurements-grid">
+        <div class="measurements-col">
+          <h3 class="meas-title">Download Measurements</h3>
+          <div id="dl-measurements"></div>
+        </div>
+        <div class="measurements-col">
+          <h3 class="meas-title">Upload Measurements</h3>
+          <div id="ul-measurements"></div>
+        </div>
+        <div class="measurements-col">
+          <h3 class="meas-title">Latency Measurements</h3>
+          <div id="latency-measurements"></div>
+        </div>
       </div>
-      <div id="map" class="route-map"></div>
-      <div class="hop-list" id="hop-list"></div>
     </div>
 
-    <footer class="speed-footer">
-      <span>nerifeige.com</span>
-    </footer>
+    <!-- Packet Loss Bar -->
+    <div class="packet-loss-section" id="packet-loss-section" style="display:none">
+      <div class="measurements-col" style="width:100%">
+        <h3 class="meas-title">Packet Loss Test (<span id="pkt-received">--</span>/<span id="pkt-sent">--</span>)</h3>
+        <div class="pkt-bar-wrap">
+          <div class="pkt-bar" id="pkt-bar"></div>
+          <span class="pkt-bar-label" id="pkt-bar-label">Received</span>
+        </div>
+      </div>
+    </div>
 
+    <footer class="speed-footer">nerifeige.com</footer>
   </div>
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

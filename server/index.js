@@ -82,7 +82,7 @@ app.use(express.static(path.join(__dirname, '../public')));
 const DOWNLOAD_BUFFER = crypto.randomBytes(1_000_000);
 
 // ── Ping ────────────────────────────────────────────────────────
-app.get('/api/ping', rateLimit('ping', 60), (req, res) => {
+app.get('/api/ping', rateLimit('ping', 500), (req, res) => {
   res.set({ 'Cache-Control': 'no-store', 'Connection': 'keep-alive' });
   res.send('');
 });
@@ -183,6 +183,21 @@ app.post('/api/geo-hops', rateLimit('geo', 5), async (req, res) => {
     results[ip] = await lookupIp(ip);
   }
   res.json(results);
+});
+
+// ── Connection info ─────────────────────────────────────────────
+app.get('/api/info', rateLimit('info', 10), async (req, res) => {
+  const clientIp = getClientIp(req);
+  const ipInfo = await lookupIp(clientIp);
+  res.json({
+    client_ip: clientIp,
+    isp: ipInfo.isp || 'Unknown',
+    city: ipInfo.city || 'Unknown',
+    country: ipInfo.country || 'Unknown',
+    lat: ipInfo.lat,
+    lon: ipInfo.lon,
+    server: 'nerifeige.com'
+  });
 });
 
 // ── Save result ─────────────────────────────────────────────────
